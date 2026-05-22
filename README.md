@@ -7,16 +7,6 @@
 
 ## 📁 项目结构
 
-plaintext
-
-
-
-
-
-
-
-
-
 ```
 code/
 ├── .idea/                     
@@ -75,53 +65,17 @@ code/
 
 ### 3. 模型训练
 
-bash
-
-
-
-运行
-
-
-
-
-
-
-
 ```
 python train.py
 ```
 
 ### 4. 模型测试
 
-bash
-
-
-
-运行
-
-
-
-
-
-
-
 ```
 python test.py
 ```
 
 ### 5. 单张影像预测
-
-bash
-
-
-
-运行
-
-
-
-
-
-
 
 ```
 python predict_image.py
@@ -139,14 +93,6 @@ python predict_image.py
 ------
 
 ## 实验结果
-
-表格
-
-
-
-
-
-
 
 |         模型          |  mIoU(%)  | Recall(%) | Precision(%) | F1-Score  |
 | :-------------------: | :-------: | :-------: | :----------: | :-------: |
