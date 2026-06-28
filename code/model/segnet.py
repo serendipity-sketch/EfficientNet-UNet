@@ -80,9 +80,9 @@ class segnetUp3(nn.Module):
         return outputs
 
 
-class segnet(nn.Module):
+class SegNet(nn.Module):
     def __init__(self, in_channels=3, num_classes=21):
-        super(segnet, self).__init__()
+        super().__init__()
         self.down1 = segnetDown2(in_channels, 64)
         self.down2 = segnetDown2(64, 128)
         self.down3 = segnetDown3(128, 256)

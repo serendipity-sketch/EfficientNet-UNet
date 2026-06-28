@@ -1,91 +1,62 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-from torch.utils.data import DataLoader
-from utils.augmentation import *
-from utils.Dataset import *
-from utils.LabelProcessor import *
-from utils.Metrics import *
+import argparse
+import json
+
 import numpy as np
-import matplotlib.pyplot as plt
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
 import config
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-BATCH_SIZE = config.BATCH_SIZE
-miou_list = [0]
-
-my_test = MyDataset([config.TEST_ROOT, config.TEST_LABEL], get_validation_augmentation(config.val_size))
-test_data = DataLoader(my_test, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-
-net = config.usemodel
-net.eval()
-if torch.cuda.device_count() > 1:
-    net = nn.DataParallel(net)
-else:
-    net=net.to(device)
-#参数选择
-if config.Parameter_selection=="best":
-    net.load_state_dict(torch.load(config.best_pth))
-elif config.Parameter_selection=="last":
-    net.load_state_dict(torch.load(config.last_pth))
-else:
-    print("Error!(请输入best或者last在config.Parameter_selection中)")
-    raise("请返回重新输入！")
-
-net = net.to(device)
-
-error = 0
-train_mpa = 0
-train_miou = 0
-train_class_acc = 0
-train_pa = 0
-train_recall=0
-train_f1=0
-train_precision=0
-train_kappa=0
-for i, sample in enumerate(test_data):
-    data = Variable(sample['img']).to(device)
-    label = Variable(sample['label']).to(device)
-    out = net(data)
-    out = F.log_softmax(out, dim=1)
-
-    pre_label = out.max(dim=1)[1].data.cpu().numpy()
-    pre_label = [i for i in pre_label]
-
-    true_label = label.data.cpu().numpy()
-    true_label = [i for i in true_label]
-
-    eval_metrix = eval_semantic_segmentation(pre_label, true_label)
-    train_mpa = eval_metrix['mean_class_accuracy'] + train_mpa
-    train_miou = eval_metrix['miou'] + train_miou
-    train_pa = eval_metrix['pixel_accuracy'] + train_pa
-    train_recall=eval_metrix["recall"]+train_recall
-    train_f1=eval_metrix["f1"]+train_f1
-    train_precision=eval_metrix["precision"]+train_precision
-    train_kappa=eval_metrix["kappa"]+train_kappa
+from utils.Dataset import SegmentationDataset
+from utils.Metrics import calc_semantic_segmentation_confusion, metrics_from_confusion
+from utils.augmentation import get_validation_augmentation
+from utils.runtime import build_model, load_checkpoint, logits_to_predictions
 
 
-    if len(eval_metrix['class_accuracy']) < config.class_num:
-        eval_metrix['class_accuracy'] = 0
-        train_class_acc = train_class_acc + eval_metrix['class_accuracy']
-        error += 1
-    else:
-        train_class_acc = train_class_acc + eval_metrix['class_accuracy']
-
-    print(eval_metrix['class_accuracy'], '================', i)
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", type=str, default=str(config.BEST_CHECKPOINT))
+    return parser.parse_args()
 
 
-epoch_str = ('test_miou: {:.5f}, test_accuracy(pa): {:.5f},  test_recall: {:.5f},test_f1:{:.5f},test_precision:{:.5f},test_kappa:{:.5f}'.format(
-    train_miou / (len(test_data) - error),
-    train_pa / (len(test_data) - error),
-    train_recall / (len(test_data) - error),
-    train_f1/ (len(test_data) - error),
-    train_precision/ (len(test_data) - error),
-    train_kappa/ (len(test_data) - error),
-))
-with open(config.test_result, 'w') as file:
-    file.write(epoch_str)
-if train_miou/(len(test_data)-error) > max(miou_list):
-    miou_list.append(train_miou/(len(test_data)-error))
-    print(epoch_str+'==========last')
+def main():
+    args = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = SegmentationDataset(
+        config.TEST_IMAGE_DIR, config.TEST_LABEL_DIR,
+        get_validation_augmentation(config.IMAGE_SIZE), config.NUM_CLASSES,
+    )
+    loader = DataLoader(dataset, config.BATCH_SIZE, shuffle=False, num_workers=0)
+    model = build_model().to(device)
+    load_checkpoint(model, args.checkpoint, device)
+    model.eval()
+
+    confusion = np.zeros((config.NUM_CLASSES, config.NUM_CLASSES), dtype=np.int64)
+    with torch.no_grad():
+        for sample in loader:
+            labels = sample["label"].to(device)
+            logits = model(sample["img"].to(device))
+            if logits.shape[-2:] != labels.shape[-2:]:
+                logits = F.interpolate(logits, labels.shape[-2:], mode="bilinear", align_corners=False)
+            confusion += calc_semantic_segmentation_confusion(
+                logits_to_predictions(logits).cpu().numpy(),
+                labels.cpu().numpy(), config.NUM_CLASSES,
+            )
+
+    metrics = metrics_from_confusion(confusion)
+    serializable = {
+        key: value.tolist() if isinstance(value, np.ndarray) else float(value)
+        for key, value in metrics.items()
+    }
+    config.MODEL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    config.TEST_RESULT.write_text(json.dumps(serializable, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(
+        f"测试集 {len(dataset)} 张 | mIoU {metrics['miou']:.5f} | "
+        f"PA {metrics['pixel_accuracy']:.5f} | F1 {metrics['f1']:.5f} | "
+        f"Precision {metrics['precision']:.5f} | Recall {metrics['recall']:.5f}"
+    )
+    print(f"详细结果: {config.TEST_RESULT}")
+
+
+if __name__ == "__main__":
+    main()

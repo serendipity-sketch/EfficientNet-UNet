@@ -1,71 +1,61 @@
-import os
-import shutil
+import argparse
 import random
-def split_dataset_corrected():
-    base_dir = r"D:\海伦\数据"
-    augmented_dir = os.path.join(base_dir, "augmented_data")
-    output_base_dir = os.path.join(base_dir, "datasets")
+import shutil
+from collections import defaultdict
+from pathlib import Path
 
-    # 创建输出目录
-    splits = ['train', 'val', 'test']
-    for split in splits:
-        os.makedirs(os.path.join(output_base_dir, split, 'images'), exist_ok=True)
-        os.makedirs(os.path.join(output_base_dir, split, 'labels'), exist_ok=True)
 
-    # 获取所有图像文件
-    image_files = [f for f in os.listdir(os.path.join(augmented_dir, 'images'))
-                   if f.endswith('.tif')]
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source", type=Path, help="Directory containing images/ and labels/")
+    parser.add_argument("output", type=Path, help="Destination dataset directory")
+    parser.add_argument("--ratios", type=float, nargs=3, default=(0.7, 0.2, 0.1), metavar=("TRAIN", "VAL", "TEST"))
+    parser.add_argument("--seed", type=int, default=701)
+    return parser.parse_args()
 
-    print(f"增强后总文件数: {len(image_files)}")
 
-    # 直接按文件划分，而不是按基础名称
-    random.shuffle(image_files)
+def split_dataset(source, output, ratios, seed):
+    if any(ratio < 0 for ratio in ratios) or abs(sum(ratios) - 1.0) > 1e-8:
+        raise ValueError("Split ratios must be non-negative and sum to 1")
 
-    # 计算划分数量
-    total_files = len(image_files)
-    train_count = int(total_files * 0.7)  # 70%
-    val_count = int(total_files * 0.2)  # 20%
-    test_count = total_files - train_count - val_count  # 10%
+    image_dir, label_dir = source / "images", source / "labels"
+    images = sorted(image_dir.glob("*.tif"))
+    if not images:
+        raise ValueError(f"No .tif images found in {image_dir}")
+    missing = [path.name for path in images if not (label_dir / path.name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Missing {len(missing)} labels; first: {missing[0]}")
 
-    # 划分文件
-    train_files = image_files[:train_count]
-    val_files = image_files[train_count:train_count + val_count]
-    test_files = image_files[train_count + val_count:]
+    # Keep all augmented variants of one source image in the same split. A
+    # file-level shuffle would leak near-identical samples into validation/test.
+    variants = defaultdict(list)
+    for path in images:
+        source_id = path.stem.rsplit("_", 1)[0]
+        variants[source_id].append(path)
 
-    print(f"总文件数: {total_files}")
-    print(f"训练集文件数: {len(train_files)} ({(len(train_files) / total_files) * 100:.1f}%)")
-    print(f"验证集文件数: {len(val_files)} ({(len(val_files) / total_files) * 100:.1f}%)")
-    print(f"测试集文件数: {len(test_files)} ({(len(test_files) / total_files) * 100:.1f}%)")
+    source_ids = sorted(variants)
+    random.Random(seed).shuffle(source_ids)
+    train_end = int(len(source_ids) * ratios[0])
+    val_end = train_end + int(len(source_ids) * ratios[1])
+    split_ids = {
+        "train": source_ids[:train_end],
+        "val": source_ids[train_end:val_end],
+        "test": source_ids[val_end:],
+    }
+    groups = {
+        split: [path for source_id in ids for path in variants[source_id]]
+        for split, ids in split_ids.items()
+    }
 
-    # 复制文件到相应目录
-    def copy_file_list(file_list, split_name):
-        copied_count = 0
-        for img_file in file_list:
-            # 复制图像
-            src_img = os.path.join(augmented_dir, 'images', img_file)
-            dst_img = os.path.join(output_base_dir, split_name, 'images', img_file)
-            shutil.copy2(src_img, dst_img)
-
-            # 复制标签
-            label_file = img_file
-            src_label = os.path.join(augmented_dir, 'labels', label_file)
-            dst_label = os.path.join(output_base_dir, split_name, 'labels', label_file)
-
-            if os.path.exists(src_label):
-                shutil.copy2(src_label, dst_label)
-                copied_count += 1
-
-        print(f"{split_name}集: 复制了 {copied_count} 个文件")
-        return copied_count
-
-    train_count = copy_file_list(train_files, 'train')
-    val_count = copy_file_list(val_files, 'val')
-    test_count = copy_file_list(test_files, 'test')
-
-    total_copied = train_count + val_count + test_count
-    print(f"\n数据集划分完成！")
-    print(f"最终分布: 训练集 {train_count}, 验证集 {val_count}, 测试集 {test_count}")
+    for split, paths in groups.items():
+        for kind in ("images", "labels"):
+            (output / split / kind).mkdir(parents=True, exist_ok=True)
+        for image_path in paths:
+            shutil.copy2(image_path, output / split / "images" / image_path.name)
+            shutil.copy2(label_dir / image_path.name, output / split / "labels" / image_path.name)
+        print(f"{split}: {len(paths)}")
 
 
 if __name__ == "__main__":
-    split_dataset_corrected()
+    args = parse_args()
+    split_dataset(args.source, args.output, args.ratios, args.seed)

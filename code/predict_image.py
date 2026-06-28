@@ -1,64 +1,57 @@
-import os
-import glob
+import argparse
 import time
+from pathlib import Path
+
 import torch
-import numpy as np
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader
-from utils.augmentation import get_validation_augmentation
-from utils.Dataset import MyDataset
+
 import config
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-output_dir = config.dir
-os.makedirs(output_dir, exist_ok=True)
-
-test_img_paths = sorted(glob.glob(os.path.join(config.TEST_ROOT, "*.tif*")))
-test_dataset = MyDataset(
-    [config.TEST_ROOT, config.TEST_LABEL],
-    transform=get_validation_augmentation(config.val_size)
-)
-test_loader = DataLoader(
-    test_dataset,
-    batch_size=1,
-    shuffle=False,
-    num_workers=0
-)
-
-print(f"共加载测试图像: {len(test_img_paths)} 张")
-
-def load_checkpoint(model, ckpt_path):
-    checkpoint = torch.load(ckpt_path, map_location=device)
-    state_dict = checkpoint.get("model_state_dict", checkpoint.get("state_dict", checkpoint))
-
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(state_dict, strict=False)
-    return model
-
-model = config.usemodel.to(device)
-model.eval()
-load_checkpoint(model, config.best_pth)
-print("模型加载完成，开始预测...")
-
-total_cost = 0.0
-
-with torch.no_grad():
-    for idx, sample in enumerate(test_loader):
-        start_time = time.time()
-        img = sample["img"].to(device)
-        img_name = os.path.basename(test_img_paths[idx])
-        base_name = os.path.splitext(img_name)[0]
-        out = model(img)
-        pred = (torch.sigmoid(out) > 0.5).squeeze().cpu().numpy().astype(np.uint8)
+from utils.Dataset import PredictionDataset
+from utils.augmentation import get_validation_augmentation
+from utils.runtime import build_model, colorize_mask, load_checkpoint, logits_to_predictions
 
 
-        save_mask = Image.fromarray(pred)
-        save_mask.save(os.path.join(output_dir, f"{base_name}_mask.png"))
-        save_mask.save(os.path.join(output_dir, f"{base_name}_mask.tif"))
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", type=Path, default=config.TEST_IMAGE_DIR)
+    parser.add_argument("--output", type=Path, default=config.PREDICTION_DIR)
+    parser.add_argument("--checkpoint", type=Path, default=config.BEST_CHECKPOINT)
+    return parser.parse_args()
 
-        cost = time.time() - start_time
-        total_cost += cost
-        print(f"[{idx+1}/{len(test_loader)}] {base_name} | 耗时: {cost:.3f}s")
 
-print(f"\n总耗时: {total_cost:.2f}s")
-print(f"预测结果保存至: {output_dir}")
+def main():
+    args = parse_args()
+    args.output.mkdir(parents=True, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = PredictionDataset(args.input, get_validation_augmentation(config.IMAGE_SIZE))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+
+    model = build_model().to(device)
+    load_checkpoint(model, args.checkpoint, device)
+    model.eval()
+    print(f"已加载 {len(dataset)} 张影像，使用设备: {device}")
+
+    started = time.time()
+    with torch.no_grad():
+        for index, sample in enumerate(loader, start=1):
+            logits = model(sample["img"].to(device))
+            prediction = logits_to_predictions(logits)[0].cpu().numpy()
+            width = int(sample["original_size"][0].item())
+            height = int(sample["original_size"][1].item())
+            if prediction.shape != (height, width):
+                prediction = F.interpolate(
+                    torch.from_numpy(prediction)[None, None].float(),
+                    size=(height, width), mode="nearest",
+                )[0, 0].to(torch.uint8).numpy()
+
+            stem = Path(sample["name"][0]).stem
+            Image.fromarray(colorize_mask(prediction)).save(args.output / f"{stem}_mask.png")
+            print(f"[{index}/{len(dataset)}] {stem}")
+
+    print(f"预测完成，用时 {time.time() - started:.2f} 秒；结果目录: {args.output.resolve()}")
+
+
+if __name__ == "__main__":
+    main()

@@ -69,11 +69,12 @@ class Decoder(nn.Module):
         return x
 
 
-class linknet(nn.Module):
-    def __init__(self, n_classes=12):
-        super(linknet, self).__init__()
+class LinkNet(nn.Module):
+    def __init__(self, n_classes=2, pretrained=True):
+        super().__init__()
 
-        base = models.resnet18(pretrained=True)
+        weights = models.ResNet18_Weights.DEFAULT if pretrained else None
+        base = models.resnet18(weights=weights)
 
         self.in_block = nn.Sequential(
             base.conv1,
@@ -103,7 +104,7 @@ class linknet(nn.Module):
 
     def forward(self, x):
         # Initial block
-        x = self.in_block(x);
+        x = self.in_block(x)
 
         # Encoder blocks
         e1 = self.encoder1(x);

@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from efficientnet_pytorch import EfficientNet
-import warnings
-warnings.filterwarnings("ignore")
 
 class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels, activation='relu'):
@@ -35,11 +33,12 @@ class UpBlock(nn.Module):
         return self.conv(x)
 
 class EfficientUNet(nn.Module):
-    def __init__(self, encoder_name='efficientnet-b4', num_classes=1, use_mixed_activation=False):
+    def __init__(self, encoder_name='efficientnet-b4', num_classes=1,
+                 use_mixed_activation=False, pretrained_encoder=False):
         super().__init__()
-        self.num_classes = num_classes
         
-        self.encoder = EfficientNet.from_pretrained(encoder_name)
+        factory = EfficientNet.from_pretrained if pretrained_encoder else EfficientNet.from_name
+        self.encoder = factory(encoder_name)
         
         dummy = torch.zeros(1, 3, 64, 64)
         with torch.no_grad():
@@ -98,11 +97,3 @@ class EfficientUNet(nn.Module):
             out = F.interpolate(out, size=(H, W), mode='bilinear', align_corners=True)
             
         return out
-    
-if __name__ == "__main__":
-    model = EfficientUNet(num_classes=2)
-    model.eval()
-    with torch.no_grad():
-        input = torch.randn(2, 3, 256, 256)
-    out = model(input)
-    print(out.shape)

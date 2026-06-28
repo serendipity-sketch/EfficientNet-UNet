@@ -82,12 +82,8 @@ def calc_semantic_segmentation_kappa(confusion):
     return kappa
 
 
-def eval_semantic_segmentation(pred_labels, gt_labels, n_class, ignore_label=IGNORE_LABEL):
-
-    confusion = calc_semantic_segmentation_confusion(
-        pred_labels, gt_labels, n_class, ignore_label
-    )
-
+def metrics_from_confusion(confusion):
+    n_class = confusion.shape[0]
     iou = calc_semantic_segmentation_iou(confusion)
     pixel_accuracy = np.diag(confusion).sum() / confusion.sum() if confusion.sum() > 0 else np.nan
     class_accuracy = np.divide(np.diag(confusion), confusion.sum(axis=1),

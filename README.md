@@ -20,27 +20,25 @@ code/
 │   ├── val/
 │   │   ├── images/             # 验证集影像
 │   │   └── labels/             # 验证集标签
-│   └── class_dict.csv          # 类别映射表
 ├── model/                      # 模型实现
 │   ├── efficientunet.py        # 核心模型：EfficientNet-UNet
 │   ├── linkent.py              # 对比模型：LinkNet
 │   ├── manet.py                # 对比模型：MANet
 │   ├── segnet.py               # 对比模型：SegNet
-│   └── unet++.py               # 对比模型：UNet++
+│   └── unetplusplus.py         # 对比模型：UNet++
 ├── output/                     # 输出目录（权重、日志、预测结果）
 ├── utils/                     
 │   ├── augmentation.py         # 数据增强
 │   ├── Dataset.py              # 自定义数据集类
 │   ├── datasets_split.py       # 数据集划分脚本
 │   ├── DiceFocalLoss.py        # Dice-Focal混合复失函数
-│   ├── LabelProcessor.py       # 标签预处理工具
 │   ├── Metrics.py              # 评价指标计算
-│   ├── config.py               # 全局配置（路径、超参数）
-│   ├── draw.py                 # 绘图
-│   ├── predict_image.py        # 预测
-│   ├── test.py                 # 测试
-│   └── train.py                # 训练（入口）
-└── README.md                   # 项目说明文档
+│   └── runtime.py              # 模型构建、权重加载与预测公共逻辑
+├── config.py                   # 全局配置（路径、超参数）
+├── predict_image.py            # 批量预测（不需要标签）
+├── test.py                     # 测试
+└── train.py                    # 训练（入口）
+README.md                       # 项目说明文档
 ```
 
 ------
@@ -58,27 +56,35 @@ code/
 | Python       | Python 3.11   |
 | Pytorch      | Pytorch 2.0.0 |
 
+安装 Python 依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
 ### 2. 数据集准备
 
 - 按 `datasets/train/val/test` 目录结构存放影像与标签
-- 运行 `utils/datasets_split.py` 可自动完成数据集划分
+- 默认数据目录为 `code/datasets`，也可通过环境变量 `GULLY_DATASET_DIR` 覆盖
+- 运行 `python code/utils/datasets_split.py <增强数据目录> <输出目录>` 可自动完成数据集划分
+- 模型、日志和预测默认写入 `code/output`，可通过 `GULLY_OUTPUT_DIR` 覆盖
 
 ### 3. 模型训练
 
 ```
-python train.py
+python code/train.py
 ```
 
 ### 4. 模型测试
 
 ```
-python test.py
+python code/test.py
 ```
 
-### 5. 单张影像预测
+### 5. 批量影像预测
 
 ```
-python predict_image.py
+python code/predict_image.py --input path/to/images
 ```
 
 ------
